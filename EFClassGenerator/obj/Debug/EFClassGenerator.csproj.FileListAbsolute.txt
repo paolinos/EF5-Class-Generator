@@ -1,0 +1,10 @@
+Z:\Hochsprachen\application\Tools\EF5-Class-Generator\EFClassGenerator\obj\Debug\EFClassGenerator.Properties.Resources.resources
+Z:\Hochsprachen\application\Tools\EF5-Class-Generator\EFClassGenerator\obj\Debug\EFClassGenerator.csproj.GenerateResource.Cache
+Z:\Hochsprachen\application\Tools\EF5-Class-Generator\EFClassGenerator\obj\Debug\EFClassGenerator.csproj.CoreCompileInputs.cache
+Z:\Hochsprachen\application\Tools\EF5-Class-Generator\EFClassGenerator\bin\Debug\EFClassGenerator.exe
+Z:\Hochsprachen\application\Tools\EF5-Class-Generator\EFClassGenerator\bin\Debug\EFClassGenerator.pdb
+Z:\Hochsprachen\application\Tools\EF5-Class-Generator\EFClassGenerator\obj\Debug\EFClassGenerator.exe
+Z:\Hochsprachen\application\Tools\EF5-Class-Generator\EFClassGenerator\obj\Debug\EFClassGenerator.pdb
+Z:\Hochsprachen\application\Tools\EF5-Class-Generator\EFClassGenerator\obj\Debug\EFClassGenerator.csprojResolveAssemblyReference.cache
+Z:\Hochsprachen\application\Tools\EF5-Class-Generator\EFClassGenerator\obj\Debug\EFClassGenerator.Form1.resources
+Z:\Hochsprachen\application\Tools\EF5-Class-Generator\EFClassGenerator\bin\Debug\EFClassGenerator.exe.config

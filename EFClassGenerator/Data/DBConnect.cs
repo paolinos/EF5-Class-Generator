@@ -2,28 +2,36 @@
 using System.Collections.Generic;
 using System.Data;
 using System.Data.SqlClient;
-using System.Linq;
-using System.Text;
+using System.Windows.Forms;
 
-namespace ClassGenerator.Data
+namespace EFClassGenerator.Data
 {
-    public class DBConnect
+    public class DbConnect
     {
-        private string msgError = "";
         private string host = "";
         private string username = "";
         private string passowrd = "";
         private string database = "";
+        private string _connectionString;
+
+        public string ConnectionString
+        {
+            get => _connectionString;
+            set
+            {
+                ConnectionStringOk = false;
+                _connectionString = value;
+            }
+        }
+
+        public string ErrorMessage { get; private set; }
+        public bool ConnectionStringOk { get; private set; } = false;
 
 
-        public DBConnect()         {        }
+
+        public DbConnect()         {        }
 
 
-        /// <summary>
-        /// Get Error Message
-        /// </summary>
-        /// <returns></returns>
-        public string Error        {            get{return msgError;}        }
 
         /// <summary>
         /// Create DB Connect, and set the first parameters to connect with DB.
@@ -42,74 +50,118 @@ namespace ClassGenerator.Data
 
         /// <summary>
         /// Check Connection.
-        /// WARNING: Maybe this it's not working.
         /// </summary>
         /// <returns></returns>
-        public bool CheckConnection()
+        public void CheckConnection()
         {
             try
             {
-                msgError = "";
-                SqlConnection connection = new SqlConnection(GetConnectionString());
-                //connection.StateChange += connection_StateChange;
-                connection.Open();
-                connection.Close();
-                return true;
+                ErrorMessage = "";
+                ConnectionStringOk = false;
+
+                using (var connection = new SqlConnection(ConnectionString))
+                {
+                    connection.Open();
+                    ConnectionStringOk = connection.State == ConnectionState.Open;
+                    connection.Close();
+                }
             }
-            
-            catch (SqlException Ex)
+            catch (SqlException ex)
             {
-                msgError = Ex.Message;
+                ErrorMessage = ex.Message;
             }
-            return false;
         }
 
-        
-
-        /// <summary>
-        /// Execute Query.
-        /// </summary>
-        /// <param name="query"></param>
-        /// <returns>DataTable result</returns>
-        public DataTable Execute(string query)
+        public List<string> CheckConnectionStringAndGetModels()
         {
-            if (CheckConnection())
+            ErrorMessage = "";
+            ConnectionStringOk = false;
+            var modelList = new DbModelList();
+
+            try
             {
-                msgError = string.Empty;
-                SqlConnection connection = new SqlConnection(GetConnectionString(240));
+                using (var connection = new SqlConnection(ConnectionString))
+                {
+                    connection.Open();
+                    ConnectionStringOk = connection.State == ConnectionState.Open;
 
-                SqlDataAdapter sqlDataAdapter = new SqlDataAdapter(query, connection);
-                DataTable dt = new DataTable();
-                sqlDataAdapter.Fill(dt);
+                    if (ConnectionStringOk) modelList.GetModels(connection, Execute);
 
-                sqlDataAdapter.Dispose();
-                connection.Close();
-
-                return dt;
+                    connection.Close();
+                }
             }
+            catch (SqlException ex)
+            {
+                ErrorMessage = ex.Message;
+                return null;
+            }
+
+            return modelList.ServerModels;
+        }
+
+
+        public List<string> GetModels()
+        {
+            var modeList = new DbModelList();
+            modeList.GetModels(OpenConnectionAndExecute);
+            
+
+            return modeList.ServerModels;
+        }
+
+
+        public DataTable Execute(SqlConnection connection, string query)
+        {
+
+            try
+            {
+                using (var adapter = new SqlDataAdapter(query, connection))
+                {
+                    var sqlData = new DataSet("SqlData");
+                    adapter.Fill(sqlData);
+                    if (sqlData.Tables.Count == 1) return sqlData.Tables[0];
+                    ErrorMessage = @"More than one Tabel returned by query";
+                    return null;
+                }
+            }
+            catch (Exception e)
+            {
+                ErrorMessage = e.Message;
+            }
+
+
+            return null;
+        }
+
+        public DataTable OpenConnectionAndExecute(string query)
+        {
+
+            try
+            {
+                using (var connection = new SqlConnection(ConnectionString))
+                using (var adapter = new SqlDataAdapter(query, connection))
+                {
+                    //ConnectionStringOk = connection.State == ConnectionState.Open;
+
+                    var sqlData = new DataSet("SqlData");
+                    adapter.Fill(sqlData);
+                    if (sqlData.Tables.Count == 1) return sqlData.Tables[0];
+
+                    ErrorMessage = @"More or less than one Table returned by query";
+                    return null;
+                }
+            }
+            catch (Exception e)
+            {
+                ErrorMessage = e.Message;
+            }
+
+            
             return null;            
         }
 
         
 
-        /// <summary>
-        /// Connection String
-        /// </summary>
-        /// <returns></returns>
-        private string GetConnectionString(int timeOut = 15)
-        {
-            return string.Format("Server={0};initial catalog={1};User Id={2};Password={3};Min Pool Size=0;Connect Timeout={4};Connection Lifetime=60;", host, database, username, passowrd, timeOut);
-        }
-
-        /// <summary>
-        /// State change - DB Event 
-        /// </summary>
-        private void connection_StateChange(object sender, StateChangeEventArgs e)
-        {
-            if (e.CurrentState == ConnectionState.Closed)
-            {
-                //  conection closed
-            }
-        }
+  
     }
 }

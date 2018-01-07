@@ -1,13 +1,15 @@
-﻿using ClassGenerator.Data;
-using ClassGenerator.Tools;
-using System;
+﻿using System;
 using System.Collections.Generic;
-using System.ComponentModel;
 using System.Data;
-using System.Drawing;
-using System.Linq;
 using System.Text;
 using System.Windows.Forms;
+using ClassGenerator;
+using ClassGenerator.Data;
+using ClassGenerator.Tools;
+using EFClassGenerator.Data;
+using EFClassGenerator.Helpers;
+using EFClassGenerator.Tools;
+
 
 /*
  * Code First Relationships Fluent API
@@ -23,13 +25,15 @@ using System.Windows.Forms;
 
 
 
-namespace ClassGenerator
+namespace EFClassGenerator
 {
     public partial class Form1 : Form
     {
         #region Private Properties
 
-        private DBConnect dbConnect = null;
+        private readonly DbConnect _dbConnect = null;
+        private readonly MsSqlServerList _msSqlServerList = null;
+        private readonly Worker _worker;
 
         #endregion Private Properties
 
@@ -39,8 +43,15 @@ namespace ClassGenerator
         public Form1()
         {
             InitializeComponent();
-            lblMessage.Text = string.Empty;
-            dbConnect = new DBConnect();
+            lblMessage.Text = @"Searching for SQL - server ...";
+            _msSqlServerList = new MsSqlServerList();
+            _dbConnect = new DbConnect();
+            //var bindingSourceServer = new BindingSource {DataSource = _msSqlServerList.Server};
+            //comboBoxHosts.DataSource = bindingSourceServer;
+            comboBoxHosts.DataSource = _msSqlServerList.Server;
+            _worker = new Worker(_dbConnect);
+            lblMessage.Text = @"Ready";
+
         }
 
         #endregion Init
@@ -49,10 +60,30 @@ namespace ClassGenerator
 
         #region Button Events
 
+        private void btnServerListRefresh_MouseUp(object sender, MouseEventArgs e)
+        {
+            SetState(@"Searching for SQL - server ...");
+            _msSqlServerList.RefreshServerList();
+            RefreshCombobox(comboBoxHosts, _msSqlServerList.Server);
+            SetState(@"Ready");
+        }
+
+        private void butCheckConnection_MouseUp(object sender, MouseEventArgs e)
+        {
+            SetState(@"Testing Connection ...");
+            SetConnectionData(false);
+            RefreshCombobox(comboBoxModels, _worker.CheckConnectionAndGetModels(SetState));
+            
+        }
+
+
         private void btnConnect_Click(object sender, EventArgs e)
         {
-            lblMessage.Text = string.Empty;
-            if (!string.IsNullOrWhiteSpace(txtHost.Text) && !string.IsNullOrWhiteSpace(txtUsername.Text)
+            SetState(@"Connecting to server...");
+            SetConnectionData(true);
+            var tables = _worker.CheckConnectionAndGetTables(SetState);
+            SetTableContent(tables);
+/*            if (!string.IsNullOrWhiteSpace(txtHost.Text) && !string.IsNullOrWhiteSpace(txtUsername.Text)
                 && !string.IsNullOrWhiteSpace(txtPassword.Text) && !string.IsNullOrWhiteSpace(txtDatabase.Text))
             {
 
@@ -63,8 +94,8 @@ namespace ClassGenerator
                 else
                 {
 
-                    dbConnect.Connect(txtHost.Text, txtUsername.Text, txtPassword.Text, txtDatabase.Text);
-                    DataTable dt = dbConnect.Execute(SQLQuery.GetTablesAndSynonyms);
+                    _dbConnect.Connect(txtHost.Text, txtUsername.Text, txtPassword.Text, txtDatabase.Text);
+                    DataTable dt = _dbConnect.OpenConnectionAndExecute(SQLQuery.GetTablesAndSynonyms);
 
                     if (dt != null)
                     {
@@ -74,14 +105,14 @@ namespace ClassGenerator
                     }
                     else
                     {
-                        lblMessage.Text = "There are some problem with the connection string." + dbConnect.Error;
+                        lblMessage.Text = "There are some problem with the connection string." + _dbConnect.ErrorMessage;
                     }
                 }
             }
             else
             {
                 lblMessage.Text = "We need the Host, Username, Password and Database, to connect with DB. Please insert this parameters.";
-            }
+            } */
         }
 
         private void btnGenerate_Click(object sender, EventArgs e)
@@ -119,17 +150,63 @@ namespace ClassGenerator
                 SearchSynonyms(listSynonyms);
 
             MessageBox.Show("The process it's end.");
+            lblMessage.Text = "done";
+            
         }
 
         #endregion Button Events
 
+        #region Other Controll Events
 
-        
+        private void cbWindowsAuthentication_CheckedChanged(object sender, EventArgs e)
+        {
+            txtUsername.Enabled = !cbWindowsAuthentication.Checked;
+            txtPassword.Enabled = !cbWindowsAuthentication.Checked;
+        }
 
 
-
+        #endregion 
 
         #region Private Methods
+
+
+        private void SetConnectionData(bool setCatalog)
+        {
+            _worker.Server = GetTextFromComboBox(comboBoxHosts);
+            _worker.User = txtUsername.Text;
+            _worker.Password = txtPassword.Text;
+            _worker.UseWindowsAuthentication = cbWindowsAuthentication.Checked;
+            _worker.Catalog = setCatalog ? GetTextFromComboBox(comboBoxModels) : null;
+            
+        }
+
+        private string GetTextFromComboBox(ComboBox combobox)
+        {
+            return string.IsNullOrEmpty(combobox.Text) ? combobox.SelectedValue?.ToString() : combobox.Text;
+        }
+
+        private void SetState(string state)
+        {
+            lblMessage.Text = state;
+            this.Refresh();
+
+        }
+
+        private void RefreshCombobox(ComboBox comboBox, List<string> items)
+        {
+            comboBox.DataSource = null;
+            comboBox.DataSource = items;
+            comboBox.SelectedIndex = comboBox.Items.Count -1;
+
+        }
+
+        private void SetTableContent(DataTable dt)
+        {
+            if (dt == null) return;
+            clbTables.DataSource = dt;
+            clbTables.DisplayMember = "name";
+            clbTables.ValueMember = "object_id";
+        }
 
         /// <summary>
         /// Search all columns by Table
@@ -139,7 +216,7 @@ namespace ClassGenerator
         {
             foreach (var item in listTables)
             {
-                DataTable dt = dbConnect.Execute(string.Format(SQLQuery.GetTablesByName, item.name));
+                DataTable dt = _dbConnect.OpenConnectionAndExecute(string.Format(SQLQuery.GetTablesByName, item.name));
 
                 CreateFile("Classes", item.name + ".cs", GenerateClass(item, dt));
                 CreateFile("Mappers", item.name + "Config.cs", GenerateMapper(item, dt));
@@ -155,18 +232,18 @@ namespace ClassGenerator
             foreach (var item in listSynonyms)
             {
                 // get path from Synonym, to search in the real table.
-                DataTable dt = dbConnect.Execute(string.Format(SQLQuery.GetSynonymsByName, item.name));
+                DataTable dt = _dbConnect.OpenConnectionAndExecute(string.Format(SQLQuery.GetSynonymsByName, item.name));
                 if (dt.Rows.Count == 1)
                 {
                     string fullPathDb = dt.Rows[0]["base_object_name"].ToString();
                     string dbPath = fullPathDb.Replace(string.Format(".[dbo].[{0}]", item.name), "");
 
                     //  Get Table
-                    dt = dbConnect.Execute(string.Format("SELECT * FROM {0}.sys.objects WHERE name ='{1}'", dbPath, item.name));
+                    dt = _dbConnect.OpenConnectionAndExecute(string.Format("SELECT * FROM {0}.sys.objects WHERE name ='{1}'", dbPath, item.name));
                     item.object_id = int.Parse(dt.Rows[0]["object_id"].ToString());
 
                     //  Get Columns
-                    dt = dbConnect.Execute(string.Format("SELECT * FROM {0}.INFORMATION_SCHEMA.columns WHERE TABLE_NAME='{1}'", dbPath, item.name));
+                    dt = _dbConnect.OpenConnectionAndExecute(string.Format("SELECT * FROM {0}.INFORMATION_SCHEMA.columns WHERE TABLE_NAME='{1}'", dbPath, item.name));
 
                     CreateFile("Classes", item.name + ".cs", GenerateClass(item, dt, dbPath + "."));
                     CreateFile("Mappers", item.name + "Config.cs", GenerateMapper(item, dt, dbPath + "."));
@@ -283,7 +360,7 @@ namespace ClassGenerator
                                 ORDER BY KU.TABLE_NAME, KU.ORDINAL_POSITION;";
 
 
-            DataTable dtPk = dbConnect.Execute(string.Format(query, dbPath, nameTable));
+            DataTable dtPk = _dbConnect.OpenConnectionAndExecute(string.Format(query, dbPath, nameTable));
             PkTable pk = null;
             foreach (DataRow item in dtPk.Rows)
             {
@@ -298,7 +375,7 @@ namespace ClassGenerator
                  * url:
                  * http://entityframework.codeplex.com/SourceControl/changeset/view/a5faddeca2be#src/EntityFramework/DataAnnotations/Schema/DatabaseGeneratedOption.cs
                  */
-                strResult.Append(string.Format("            HasKey(x => x.{0}).Property(x => x.{0}).HasDatabaseGeneratedOption(DatabaseGeneratedOption.Identity);\r\n", UppercaseFirst(pk.pkColumn)));
+                strResult.Append(string.Format("            HasKey(x => x.{0}).Property(x => x.{0}).HasDatabaseGeneratedOption(DatabaseGeneratedOption.Identity);\r\n", UppercaseFirst(pk.PkColumn)));
             }
             return strResult.ToString();
         }
@@ -323,7 +400,7 @@ namespace ClassGenerator
                     + " INNER JOIN {0}sys.columns AS columnRef ON fkc.referenced_object_id = columnRef.object_id AND fkc.referenced_column_id = columnRef.column_id"
                     + " WHERE fkc.parent_object_id = {1}";
 
-            DataTable dtFkRel = dbConnect.Execute(string.Format(queryFkRelations, dbPath, object_id));
+            DataTable dtFkRel = _dbConnect.OpenConnectionAndExecute(string.Format(queryFkRelations, dbPath, object_id));
             return dtFkRel;
         }
 
@@ -375,10 +452,11 @@ namespace ClassGenerator
                 queryFormat = string.Format(SQLQuery.GetManyToMany, object_id, dbPath);
             }
 
-            DataTable dtFkRel = dbConnect.Execute(queryFormat);
+            var dtFkRel = _dbConnect.OpenConnectionAndExecute(queryFormat) ?? new DataTable();
 
             int tmpPos = 0;
             FkTable[] fkTables = new FkTable[dtFkRel.Rows.Count];
+
 
             FkTable tmpFk = null;
 
@@ -419,7 +497,7 @@ namespace ClassGenerator
             {
                 tmpProperties.Append("\r\n");
                 tableColumns = new TableColumns(row);
-                tmpProperties.Append(string.Format(@"        public {0}{4} {1} {2} get; set; {3}", GetNetType(tableColumns.type), UppercaseFirst(tableColumns.columnName), "{", "}", tableColumns.isNullable ? "?" : ""));
+                tmpProperties.Append(string.Format(@"        public {0}{4} {1} {2} get; set; {3}", GetNetType(tableColumns.Type), UppercaseFirst(tableColumns.ColumnName), "{", "}", tableColumns.IsNullable ? "?" : ""));
                 
             }
 
@@ -429,7 +507,7 @@ namespace ClassGenerator
             foreach (FkTable item in fkList)
             {
                 tmpRelations.Append("\r\n");
-                tmpRelations.Append(string.Format(@"        public {0} {3} {1} get; set; {2}", item.pkTableName, "{", "}", RemoveLast_S(item.pkTableName)));
+                tmpRelations.Append(string.Format(@"        public {0} {3} {1} get; set; {2}", item.PkTableName, "{", "}", RemoveLast_S(item.PkTableName)));
             }
 
 
@@ -438,16 +516,16 @@ namespace ClassGenerator
             foreach (FkTable item in fkList)
             {
                 tmpRelations.Append("\r\n");
-                tmpRelations.Append(string.Format("        public virtual IList<{0}> {0} {1} get; set; {2}\r\n", item.fkTableName, "{", "}"));
-                tmpConstructRelations.Append(string.Format("            {0} = new List<{0}>();\r\n", item.fkTableName, "{", "}"));
+                tmpRelations.Append(string.Format("        public virtual IList<{0}> {0} {1} get; set; {2}\r\n", item.FkTableName, "{", "}"));
+                tmpConstructRelations.Append(string.Format("            {0} = new List<{0}>();\r\n", item.FkTableName, "{", "}"));
             }
 
             //  Many to Many - Tables related
             fkList = GetFkRelationShips(objectDB.object_id, TypeSearchRelationship.ManyToMany, dbPath);
             foreach (FkTable item in fkList)
             {
-                tmpRelations.Append(string.Format("        public virtual IList<{0}> {0} {1} get; set; {2}\r\n", item.pkTableName, "{", "}"));
-                tmpConstructRelations.Append(string.Format("            {0} = new List<{0}>();\r\n", item.pkTableName, "{", "}"));
+                tmpRelations.Append(string.Format("        public virtual IList<{0}> {0} {1} get; set; {2}\r\n", item.PkTableName, "{", "}"));
+                tmpConstructRelations.Append(string.Format("            {0} = new List<{0}>();\r\n", item.PkTableName, "{", "}"));
             }
             
             //----------------------------------------------------------------------------------------------
@@ -520,11 +598,11 @@ namespace ClassGenerator
         private string GenerateMapperProperties(TableColumns tableColumns)
         {
             StringBuilder property = new StringBuilder();
-            property.Append(string.Format(@"            Property(x => x.{1}).HasColumnName(""{0}"")", tableColumns.columnName, UppercaseFirst(tableColumns.columnName)));
-            if (!tableColumns.isNullable)
+            property.Append(string.Format(@"            Property(x => x.{1}).HasColumnName(""{0}"")", tableColumns.ColumnName, UppercaseFirst(tableColumns.ColumnName)));
+            if (!tableColumns.IsNullable)
                 property.Append(".IsRequired()");
 
-            if (GetNetType(tableColumns.type) == "string")
+            if (GetNetType(tableColumns.Type) == "string")
                 property.Append(".IsUnicode(false)");
 
             property.Append(";");
@@ -561,11 +639,11 @@ namespace ClassGenerator
                             {6});";
 
                 return string.Format(tmpStr,
-                                fkTable.pkTableName,
+                                fkTable.PkTableName,
                                 name,
-                                fkTable.fkTableName,
-                                fkTable.fkColumn,
-                                fkTable.pkColumn,
+                                fkTable.FkTableName,
+                                fkTable.FkColumn,
+                                fkTable.PkColumn,
                                 "{", "}");
             }
             else
@@ -577,81 +655,17 @@ namespace ClassGenerator
                             .HasForeignKey(d => d.{2});";
 
                 return string.Format(tmpStr,
-                                RemoveLast_S(fkTable.pkTableName),
+                                RemoveLast_S(fkTable.PkTableName),
                                 name,
-                                UppercaseFirst(fkTable.fkColumn));
+                                UppercaseFirst(fkTable.FkColumn));
             }
         }
+
 
         #endregion Configuration Classe
-    }
 
-    internal class TableColumns
-    {
-        public string tableName { get; set; }
-        public string columnName { get; set; }
-        public int order { get; set; }
-        public bool isNullable { get; set; }
-        public int maxLength { get; set; }
-        public string type { get; set; }
-
-        public TableColumns(DataRow dr)
-        {
-            tableName = Convert.ToString(dr["TABLE_NAME"]);
-            columnName = Convert.ToString(dr["COLUMN_NAME"]);
-            order = int.Parse(Convert.ToString(dr["ORDINAL_POSITION"]));
-            isNullable = Convert.ToString(dr["IS_NULLABLE"]).Trim() == "NO" ? false : true;
-            int tmpMaxLength = 0;
-            int.TryParse(dr["CHARACTER_MAXIMUM_LENGTH"].ToString(), out tmpMaxLength);
-            maxLength = tmpMaxLength;
-            type = Convert.ToString(dr["DATA_TYPE"]);
-        }
+     
     }
 
 
-    internal class PkTable
-    {
-        public string tableName { get; set; }
-        public string pkColumn { get; set; }
-
-        public PkTable(DataRow dr)
-        {
-            tableName = Convert.ToString(dr["tablename"]);
-            pkColumn = Convert.ToString(dr["primarykeycolumn"]);
-        }
-    }
-
-    internal class FkTable
-    {
-        public string fkName { get; set; }
-
-        public string fkTableName { get; set; }
-        public string fkColumn { get; set; }
-        
-
-        public string pkColumn { get; set; }
-        public string pkTableName { get; set; }
-
-        public int CreateConfig { get; set; }
-
-        public FkTable(DataRow dr)
-        {
-            fkName = Convert.ToString(dr["FkName"]);
-            fkColumn = Convert.ToString(dr["FkColumn"]);
-            fkTableName = Convert.ToString(dr["FkTable"]);
-
-            pkColumn = Convert.ToString(dr["PkColumn"]);
-            pkTableName = Convert.ToString(dr["PkTable"]);
-
-            CreateConfig = 0;
-            try
-            {
-                if (dr["CreateConfig"] != null)
-                    CreateConfig = int.Parse(Convert.ToString(dr["CreateConfig"]));
-            }
-            catch (Exception){            }
-            
-
-        }
-    }
 }
